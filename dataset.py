@@ -89,19 +89,19 @@ def preselection(event):
         return False
     for ecf in [
         b'JetsAK15_ecfC2b1',
-        b'JetsAK15_ecfC2b2',
-        b'JetsAK15_ecfC3b1',
-        b'JetsAK15_ecfC3b2',
+        # b'JetsAK15_ecfC2b2',
+        # b'JetsAK15_ecfC3b1',
+        # b'JetsAK15_ecfC3b2',
         b'JetsAK15_ecfD2b1',
-        b'JetsAK15_ecfD2b2',
+        # b'JetsAK15_ecfD2b2',
         b'JetsAK15_ecfM2b1',
-        b'JetsAK15_ecfM2b2',
-        b'JetsAK15_ecfM3b1',
-        b'JetsAK15_ecfM3b2',
+        # b'JetsAK15_ecfM2b2',
+        # b'JetsAK15_ecfM3b1',
+        # b'JetsAK15_ecfM3b2',
         # b'JetsAK15_ecfN2b1',
         b'JetsAK15_ecfN2b2',
         # b'JetsAK15_ecfN3b1',
-        b'JetsAK15_ecfN3b2'
+        # b'JetsAK15_ecfN3b2'
         ]:
         try:
             if event[ecf][1] <= 0.:
@@ -262,17 +262,17 @@ def main():
     # process_signal('4881627.root')
     # process_bkg('151.root')
 
-    # process_signal(
-    #     iter_rootfiles_umd(seutils.ls_wildcard(
-    #         'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/sig_mz250_rinv0p3_mDark20_Mar31/*.root'
-    #         ))
-    #     )
-
-    process_bkg(
+    process_signal(
         iter_rootfiles_umd(seutils.ls_wildcard(
-            'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/bkg_May04_year2018/*/*.root'
-            )),
+            'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/sig_mz250_rinv0p3_mDark20_Mar31/*.root'
+            ))
         )
+
+    # process_bkg(
+    #     iter_rootfiles_umd(seutils.ls_wildcard(
+    #         'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/bkg_May04_year2018/*/*.root'
+    #         )),
+    #     )
 
     # for event in uptools.iter_events('187.root'):
     #     print(event)
