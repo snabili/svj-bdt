@@ -1,8 +1,9 @@
 
 import os, os.path as osp
 import numpy as np
-import uptools
-
+import tqdm
+import uptools, seutils
+from contextlib import contextmanager
 
 
 class Bunch:
@@ -82,9 +83,11 @@ def preselection(event):
         return False
     elif event[b'JetsAK8.fCoordinates.fPt'][0] < 550.:
         return False
-    elif len(event[b'JetsAK15.fCoordinates.fPt']) < 1:
+    elif len(event[b'JetsAK15.fCoordinates.fPt']) < 2:
         return False
-    elif not all(event[ecf][1] > 0. for ecf in [
+    elif np.sqrt(1.+event[b'MET']/event[b'JetsAK15.fCoordinates.fPt'][1]) < 1.08:
+        return False
+    for ecf in [
         b'JetsAK15_ecfC2b1',
         b'JetsAK15_ecfC2b2',
         b'JetsAK15_ecfC3b1',
@@ -99,12 +102,13 @@ def preselection(event):
         b'JetsAK15_ecfN2b2',
         # b'JetsAK15_ecfN3b1',
         b'JetsAK15_ecfN3b2'
-        ]):
-        return False
-    elif np.sqrt(1.+event[b'MET']/event[b'JetsAK15.fCoordinates.fPt'][1]) < 1.08:
-        return False
-    else:
-        return True
+        ]:
+        try:
+            if event[ecf][1] <= 0.:
+                return False
+        except IndexError:
+            return False
+    return True
 
 
 def get_subl(event):
@@ -180,15 +184,11 @@ def process_signal(rootfiles, outfile=None):
         n_final += 1
 
         X.append([
-            subl.girth,
-            subl.ptD,
-            subl.axismajor,
-            subl.axisminor,
-            subl.ecfM2b1,
-            subl.ecfD2b1,
-            subl.ecfC2b1,
-            subl.ecfN2b2,
+            subl.girth, subl.ptD, subl.axismajor, subl.axisminor,
+            subl.ecfM2b1, subl.ecfD2b1, subl.ecfC2b1, subl.ecfN2b2,
             subl.metdphi,
+            subl.pt, subl.eta, subl.phi, subl.energy,
+            zprime.pt, zprime.eta, zprime.phi, zprime.energy
             ])
 
     print(f'n_total: {n_total}; n_presel: {n_presel}; n_final: {n_final} ({100.*n_final/float(n_total):.2f}%)')
@@ -200,48 +200,83 @@ def process_signal(rootfiles, outfile=None):
     np.savez(outfile, X=X)
 
 
-def process_bkg(rootfiles, outfile=None):
-    n_total = 0
-    n_presel = 0
-    n_final = 0
+def process_bkg(rootfiles, outfile=None, chunked_save=None, nmax=None):
+    n_total_all = 0
+    n_presel_all = 0
+    for rootfile in uptools.format_rootfiles(rootfiles):
+        X = []
+        n_total_this = 0
+        n_presel_this = 0
+        try:
+            for event in uptools.iter_events(rootfile):
+                n_total_this += 1
+                n_total_all += 1
+                if not preselection(event): continue
+                n_presel_this += 1
+                n_presel_all += 1
+                subl = get_subl(event)
+                X.append([
+                    subl.girth, subl.ptD, subl.axismajor, subl.axisminor,
+                    subl.ecfM2b1, subl.ecfD2b1, subl.ecfC2b1, subl.ecfN2b2,
+                    subl.metdphi,
+                    subl.pt, subl.eta, subl.phi, subl.energy
+                    ])
+        except IndexError:
+            if n_presel_this == 0:
+                print(f'Problem with {rootfile}; no entries, skipping')
+                continue
+            else:
+                print(f'Problem with {rootfile}; saving {n_presel_this} good entries')
 
-    X = []
+        outfile = 'data/bkg/{}.npz'.format(dirname_plus_basename(rootfile).replace('.root', ''))
+        print(f'n_total: {n_total_this}; n_presel: {n_presel_this} ({(100.*n_presel_this)/n_total_this:.2f}%)')
+        outdir = osp.abspath(osp.dirname(outfile))
+        if not osp.isdir(outdir): os.makedirs(outdir)
+        print(f'Saving {n_presel_this} entries to {outfile}')
+        np.savez(outfile, X=X)
 
-    for event in uptools.iter_events(rootfiles):
-        n_total += 1
-        if not preselection(event): continue
-        n_presel += 1
-        subl = get_subl(event)
-        n_final += 1
 
-        X.append([
-            subl.girth,
-            subl.ptD,
-            subl.axismajor,
-            subl.axisminor,
-            subl.ecfM2b1,
-            subl.ecfD2b1,
-            subl.ecfC2b1,
-            subl.ecfN2b2,
-            subl.metdphi,
-            ])
 
-    print(f'n_total: {n_total}; n_presel: {n_presel}; n_final: {n_final} ({100.*n_final/float(n_total):.2f}%)')
+def dirname_plus_basename(fullpath):
+    return f'{osp.basename(osp.dirname(fullpath))}/{osp.basename(fullpath)}'
 
-    if outfile is None: outfile = 'data/bkg.npz'
-    outdir = osp.abspath(osp.dirname(outfile))
-    if not osp.isdir(outdir): os.makedirs(outdir)
-    print(f'Saving {n_final} entries to {outfile}')
-    np.savez(outfile, X=X)
+@contextmanager
+def make_local(rootfile):
+    """Copies rootfile to local, and removes when done"""
+    tmpfile = f'tmp/{dirname_plus_basename(rootfile)}'
+    seutils.cp(rootfile, tmpfile)
+    try:
+        yield tmpfile
+    finally:
+        print(f'Removing {tmpfile}')
+        os.remove(tmpfile)
 
+
+def iter_rootfiles_umd(rootfiles):
+    for rootfile in rootfiles:
+        with make_local(rootfile) as tmpfile:
+            yield tmpfile
 
 
 def main():
     # process_signal('4881627.root')
     # process_bkg('151.root')
 
-    process_signal('gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/sig_mz250_rinv0p3_mDark20_Mar31/4881627.root')
+    # process_signal(
+    #     iter_rootfiles_umd(seutils.ls_wildcard(
+    #         'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/sig_mz250_rinv0p3_mDark20_Mar31/*.root'
+    #         ))
+    #     )
 
+    process_bkg(
+        iter_rootfiles_umd(seutils.ls_wildcard(
+            'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/bkg_May04_year2018/*/*.root'
+            )),
+        )
+
+    # for event in uptools.iter_events('187.root'):
+    #     print(event)
+    #     break
 
 if __name__ == '__main__':
     main()
