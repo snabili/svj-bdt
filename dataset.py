@@ -1,5 +1,5 @@
 
-import os, os.path as osp
+import os, os.path as osp, glob
 import numpy as np
 import tqdm
 import uptools, seutils
@@ -104,7 +104,7 @@ def preselection(event):
         # b'JetsAK15_ecfN3b2'
         ]:
         try:
-            if event[ecf][1] <= 0.:
+            if event[ecf][1] < 0.:
                 return False
         except IndexError:
             return False
@@ -263,10 +263,15 @@ def main():
     # process_bkg('151.root')
 
     process_signal(
-        iter_rootfiles_umd(seutils.ls_wildcard(
-            'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/sig_mz250_rinv0p3_mDark20_Mar31/*.root'
-            ))
+        list(sorted(glob.iglob('raw_signal/*.root')))
         )
+
+    # process_signal(
+    #     iter_rootfiles_umd(seutils.ls_wildcard(
+    #         'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/sig_mz250_rinv0p3_mDark20_Mar31/*.root'
+    #         )),
+    #     outfile='test.npz'
+    #     )
 
     # process_bkg(
     #     iter_rootfiles_umd(seutils.ls_wildcard(
