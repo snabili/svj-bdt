@@ -4,6 +4,7 @@ import numpy as np
 import tqdm
 import uptools, seutils
 from contextlib import contextmanager
+import argparse
 
 
 class Bunch:
@@ -259,29 +260,29 @@ def iter_rootfiles_umd(rootfiles):
 
 
 def main():
-    # process_signal('4881627.root')
-    # process_bkg('151.root')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('action', type=str, choices=['signal', 'bkg', 'signal_local'])
+    args = parser.parse_args()
 
-    process_signal(
-        list(sorted(glob.iglob('raw_signal/*.root')))
-        )
-
-    # process_signal(
-    #     iter_rootfiles_umd(seutils.ls_wildcard(
-    #         'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/sig_mz250_rinv0p3_mDark20_Mar31/*.root'
-    #         )),
-    #     outfile='test.npz'
-    #     )
-
-    # process_bkg(
-    #     iter_rootfiles_umd(seutils.ls_wildcard(
-    #         'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/bkg_May04_year2018/*/*.root'
-    #         )),
-    #     )
-
-    # for event in uptools.iter_events('187.root'):
-    #     print(event)
-    #     break
+    if args.signal_local:
+        process_signal(
+            list(sorted(glob.iglob('raw_signal/*.root')))
+            )
+    elif args.signal:
+        process_signal(
+            iter_rootfiles_umd(
+                seutils.ls_wildcard(
+                    'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/sig_mz250_rinv0p3_mDark20_Mar31/*.root'
+                    )
+                + ['gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/thomas.klijnsma/qcdtest3/sig_ECF_typeCDMN_Jan29/1.root']
+                ),
+            )
+    elif args.bkg:
+        process_bkg(
+            iter_rootfiles_umd(seutils.ls_wildcard(
+                'gsiftp://hepcms-gridftp.umd.edu//mnt/hadoop/cms/store/user/snabili/BKG/bkg_May04_year2018/*/*.root'
+                )),
+            )
 
 if __name__ == '__main__':
     main()
