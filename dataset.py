@@ -48,6 +48,18 @@ class FourVectorArray:
     def __len__(self):
         return len(self.bunch)
 
+    @property
+    def px(self):
+        return np.cos(self.phi) * self.pt
+
+    @property
+    def py(self):
+        return np.sin(self.phi) * self.pt
+
+    @property
+    def pz(self):
+        return np.sinh(self.eta) * self.pt
+
 
 def is_array(a):
     """
@@ -78,6 +90,30 @@ def calc_dphi(phi1, phi2):
 def calc_dr(eta1, phi1, eta2, phi2):
     return np.sqrt((eta1-eta2)**2 + calc_dphi(phi1, phi2)**2)
 
+
+def calculate_mt_rt(jets, met, metphi):
+    met_x = np.cos(metphi) * met
+    met_y = np.sin(metphi) * met
+    jet_x = np.cos(jets.phi) * jets.pt
+    jet_y = np.sin(jets.phi) * jets.pt
+    # jet_e = np.sqrt(jets.mass2 + jets.pt**2)
+    # m^2 + pT^2 = E^2 - pT^2 - pz^2 + pT^2 = E^2 - pz^2
+    jet_e = np.sqrt(jets.energy**2 - jets.pz**2)
+    mt = np.sqrt( (jet_e + met)**2 - (jet_x + met_x)**2 - (jet_y + met_y)**2 )
+    rt = met / mt
+    return mt, rt
+
+def calculate_mt(jets, met, metphi):
+    metx = np.cos(metphi) * met
+    mety = np.sin(metphi) * met
+    # Actually np.sqrt(jets.mass2 + jets.pt**2), 
+    # but mass2 = energy**2 - pt**2 - pz**2
+    jets_transverse_e = np.sqrt(jets.energy**2 - jets.pz**2)
+    mt = np.sqrt(
+        (jets_transverse_e + met)**2
+        - (jets.px + metx)**2 - (jets.py + mety)**2
+        )
+    return mt
 
 def preselection(event):
     if len(event[b'JetsAK8.fCoordinates.fPt']) == 0:
