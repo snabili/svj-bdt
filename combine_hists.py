@@ -9,14 +9,12 @@ uptools.logger.setLevel(logging.WARNING)
 
 from dataset import preselection, get_subl, calculate_mt_rt
 
-
-def get_hist_worker(input):
+def get_hist(rootfile, model, outfile):
     '''
     Worker function that reads a single rootfile and dumps events that
     pass the preselection to a .npz file.
     To be used in get_hist_mp.
     '''
-    rootfile, model, outfile = input
     X = []
     X_histogram = []
     n_total = 0
@@ -55,6 +53,10 @@ def get_hist_worker(input):
         n_total=n_total,
         n_presel=n_presel
         )
+
+def get_hist_worker(input):
+    '''Alias for get_hist that takes only 1 iterable (for mp)'''
+    get_hist(*input)
 
 def get_hist_mp(model, rootfiles, outfile, n_threads=12, keep_tmp_files=False):
     '''
@@ -215,8 +217,8 @@ def cli():
 
 
 if __name__ == '__main__':
-    test_npz_to_TH1s()
-    # cli()
+    # test_npz_to_TH1s()
+    cli()
     # test_get_hist_worker()
     # test_get_hist_mp()
     # combine_npzs('TMP_Sep14_133719_mz250_mdark10_rinv0p3.npz')
