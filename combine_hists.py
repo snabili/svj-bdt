@@ -1,4 +1,4 @@
-import os, os.path as osp, uuid, multiprocessing, glob, shutil, logging
+import os, os.path as osp, uuid, multiprocessing, shutil, logging
 from time import strftime
 
 import numpy as np
@@ -8,6 +8,7 @@ import uptools
 uptools.logger.setLevel(logging.WARNING)
 
 from dataset import preselection, get_subl, calculate_mt_rt
+
 
 def get_hist(rootfile, model, outfile):
     '''
@@ -54,9 +55,11 @@ def get_hist(rootfile, model, outfile):
         n_presel=n_presel
         )
 
+
 def get_hist_worker(input):
     '''Alias for get_hist that takes only 1 iterable (for mp)'''
     get_hist(*input)
+
 
 def get_hist_mp(model, rootfiles, outfile, n_threads=12, keep_tmp_files=False):
     '''
@@ -84,13 +87,15 @@ def get_hist_mp(model, rootfiles, outfile, n_threads=12, keep_tmp_files=False):
         shutil.rmtree(tmpdir)
 
 
-def combine_npzs(outdir, outfile=None):
-    if outfile is None: outfile = outdir.split('_', 3)[-1]
-    npzs = glob.glob(osp.join(outdir, '*.npz'))
-    print(f'Dumping {len(npzs)} npzs to {outfile}')
+def combine_ds(ds):
+    """
+    Takes a iterable of dict-like objects with the same keys,
+    and combines them in a single dict.
+
+    Arrays will be concatenated, scalar values will be summed
+    """
     combined = {}
-    for npz in npzs:
-        d = np.load(npz)
+    for d in ds:
         for key, value in d.items():
             if not key in combined: combined[key] = []
             combined[key].append(value)
@@ -101,65 +106,98 @@ def combine_npzs(outdir, outfile=None):
             print(key, combined[key])
         else:
             combined[key] = np.concatenate(values)
-    np.savez(outfile, **combined)
+    return combined
 
 
-def npz_to_TH1s(npz, label, threshold_loose=0.596, threshold_tight=0.828):
-    '''Puts the array contents of a .npz into TH1s'''
+def combine_npzs(npzs):
+    """
+    Like combine_ds, but instead takes an iterable of npz files
+    """
+    return combine_ds((np.load(npz) for npz in npzs))
+
+
+def try_import_ROOT():
     try:
         import ROOT
     except ImportError:
         print(
-            'npz_to_TH1s requires ROOT to be installed too! Run:\n'
+            'ROOT is required to be installed for this operation. Run:\n'
             'conda install -c conda-forge root'
             )
         raise
+
+
+def combine_ds_with_weights(ds, weights):
+    """
+    Combines several dicts into a single dict, with weights
+    """
+    if len(ds) != len(weights): raise ValueError('len ds != len weights')
+    counts = [ len(d['score']) for d in ds ]
+    optimal_counts = optimal_count(counts, weights)
+
+    # Purely for debugging:
+    print('Counts:')
+    for i, (count, opt_count) in enumerate(zip(counts, optimal_counts)):
+        print(f'{i} : {count:8} available, using {opt_count}')
+
+    # Combine from an iterator with the dicts cut to size
+    return combine_ds(( shrink_dict(d, opt_count) for d, opt_count in zip(ds, optimal_counts) ))
+
+
+def shrink_dict(d, n):
+    """
+    Slices all values that are arrays in d up to :n
+    """
+    return { k : v[:n] if v.shape else v for k, v in d.items()}
+
+
+# Defauly mt binning
+MT_BINNING = [160.+8.*i for i in range(44)]
+
+def make_mt_histogram(name, mt, score=None, threshold=None, mt_binning=None):
+    """
+    Dumps the mt array to a TH1F. If `score` and `threshold` are supplied, a
+    cut score>threshold will be applied.
+    """
+    try_import_ROOT()
+    import ROOT
     from array import array
-    d = np.load(npz)
-    score = d['score']
-    binning = array('f', [160.+8.*i for i in range(44)])
-    mt = d['mt']
-    mt_loose = d['mt'][score > threshold_loose]
-    mt_tight = d['mt'][score > threshold_tight]
-    histograms = []
-    for name, values in [
-        (f'{label}_mt', mt),
-        (f'{label}_mt_loose', mt_loose),
-        (f'{label}_mt_tight', mt_tight)
-        ]:
-        h = ROOT.TH1F(name, name, len(binning)-1, binning)
-        ROOT.SetOwnership(h, False)
-        [ h.Fill(x) for x in values ]
-        histograms.append(h)
-    return histograms
+    if threshold is not None: mt = mt[score > threshold]
+    binning = array('f', MT_BINNING if mt_binning is None else mt_binning)
+    h = ROOT.TH1F(name, name, len(binning)-1, binning)
+    ROOT.SetOwnership(h, False)
+    [ h.Fill(x) for x in mt ]
+    return h
 
-def npzs_to_root(npzs, labels, rootfile):
-    try:
-        import ROOT
-    except ImportError:
-        print(
-            'npzs_to_root requires ROOT to be installed too! Run:\n'
-            'conda install -c conda-forge root'
-            )
-        raise
-    try:
-        f = ROOT.TFile.Open(rootfile, 'RECREATE')
-        for npz, label in zip(npzs, labels):
-            print(f'Dumping histograms from {npz} -> {rootfile}')
-            for h in npz_to_TH1s(npz, label):
-                h.Write()
-    finally:
-        f.Close()
-    
 
-def test_npz_to_TH1s():
-    # npz_to_TH1s('mz250_mdark10_rinv0p3.npz')
-    npzs_to_root(['mz250_mdark10_rinv0p3.npz'], ['mz250'], 'test.root')
+def optimal_count(counts, weights):
+    """
+    Given an array of counts and an array of desired weights (e.g. cross sections),
+    find the highest possible number of events without underrepresenting any bin
+    """
+    # Normalize weights to 1.
+    weights = np.array(weights) / sum(weights)
 
+    # Compute event fractions
+    counts = np.array(counts)
+    n_total = np.sum(counts)
+    fractions = counts / n_total
+
+    imbalance = weights / fractions
+    i_max_imbalance = np.argmax(imbalance)
+    max_imbalance = imbalance[i_max_imbalance]
+
+    if max_imbalance == 1.:
+        # Counts array is exactly balanced; Don't do anything
+        return counts
+
+    n_target = counts[i_max_imbalance] / weights[i_max_imbalance]
+    optimal_counts = (weights * n_target).astype(np.int32)
+    return optimal_counts
 
 
 # ________________________________________________________
-# Some tests, created during development
+# Some tests
 
 def test_get_hist_worker():
     model = xgb.XGBClassifier()
@@ -177,48 +215,26 @@ def test_get_hist_mp():
     outfile = 'mz250_mdark10_rinv0p3.npz'
     # get_hist_worker((rootfiles[1], model, 'out.npz'))
     get_hist_mp(model, rootfiles, outfile)
-# ________________________________________________________
 
-
-def process_mz250(model):
-    rootfiles = seutils.ls_wildcard(
-        'root://cmseos.fnal.gov//store/user/lpcdarkqcd/MCSamples_Summer21/TreeMaker'
-        '/genjetpt375_mz250_mdark10_rinv0.3/*.root'
+def test_optimal_count():
+    counts = np.array([ 100, 200, 150 ])
+    np.testing.assert_almost_equal(
+        optimal_count(counts, [1./3, 1./3, 1./3]),
+        np.array([ 100, 100, 100 ])
         )
-    get_hist_mp(model, rootfiles, 'mz250_mdark10_rinv0p3.npz')
-
-def process_qcd(model):
-    for qcd_dir in seutils.ls_wildcard(
-        'root://cmseos.fnal.gov//store/user/lpcdarkqcd/boosted/BKG/bkg_May04_year2018/*QCD_Pt*'
-        ):
-        print(f'Processing {qcd_dir}')
-        outfile = osp.basename(qcd_dir + '.npz')
-        rootfiles = seutils.ls_wildcard(osp.join(qcd_dir, '*.root'))
-        get_hist_mp(model, rootfiles, outfile)
-
-
-def cli():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['mz250', 'qcd'], type=str)
-    parser.add_argument(
-        '-m', '--modeljson', type=str,
-        default='/Users/klijnsma/work/svj/bdt/svjbdt_Aug02.json'
+    np.testing.assert_almost_equal(
+        optimal_count(counts, [.2, .4, .4]),
+        np.array([ 75, 150, 150 ])
         )
-    args = parser.parse_args()
-
-    model = xgb.XGBClassifier()
-    model.load_model(args.modeljson)
-
-    if args.action == 'mz250':
-        process_mz250(model)
-    elif args.action == 'qcd':
-        process_qcd(model)
-
-
-if __name__ == '__main__':
-    # test_npz_to_TH1s()
-    cli()
-    # test_get_hist_worker()
-    # test_get_hist_mp()
-    # combine_npzs('TMP_Sep14_133719_mz250_mdark10_rinv0p3.npz')
+    np.testing.assert_almost_equal(
+        optimal_count(counts, counts/counts.sum()),
+        counts
+        )
+    np.testing.assert_almost_equal(
+        optimal_count(
+            [18307, 104484, 366352, 242363, 163624],
+            [136.52, 278.51, 150.96, 26.24, 7.49]
+            ),
+        [18307, 37347, 20243, 3518, 1004]
+        )
+    print('Succeeded')
