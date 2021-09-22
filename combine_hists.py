@@ -98,12 +98,12 @@ def combine_ds(ds):
     for d in ds:
         for key, value in d.items():
             if not key in combined: combined[key] = []
+            if value.shape and len(value) == 0: continue
             combined[key].append(value)
     # Make proper np arrays
     for key, values in combined.items():
         if len(values[0].shape) == 0:
             combined[key] = np.array(values).sum()
-            print(key, combined[key])
         else:
             combined[key] = np.concatenate(values)
     return combined
