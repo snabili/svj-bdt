@@ -10,11 +10,13 @@ uptools.logger.setLevel(logging.WARNING)
 from dataset import preselection, get_subl, calculate_mt_rt
 
 
-def get_hist(rootfile, model, outfile):
+def get_scores(rootfile, model):
     '''
-    Worker function that reads a single rootfile and dumps events that
-    pass the preselection to a .npz file.
-    To be used in get_hist_mp.
+    Worker function that reads a single rootfile and returns the
+    bdt score, and a few event-level variables to be potentially used
+    for histogramming.
+
+    Only uses events that pass the preselection.
     '''
     X = []
     X_histogram = []
@@ -47,8 +49,7 @@ def get_hist(rootfile, model, outfile):
     X_histogram = np.array(X_histogram)
     outdir = osp.dirname(outfile)
     if outdir and not osp.isdir(outdir): os.makedirs(outdir)
-    np.savez(
-        outfile,
+    return dict(
         score=score,
         **{key: X_histogram[:,index] for index, key in enumerate(['mt', 'rt', 'pt', 'energy'])},
         n_total=n_total,
@@ -56,35 +57,11 @@ def get_hist(rootfile, model, outfile):
         )
 
 
-def get_hist_worker(input):
-    '''Alias for get_hist that takes only 1 iterable (for mp)'''
-    get_hist(*input)
-
-
-def get_hist_mp(model, rootfiles, outfile, n_threads=12, keep_tmp_files=False):
+def dump_score_npz(rootfile, model, outfile):
+    '''    
+    Calculates score and dumps events that pass the preselection to a .npz file.
     '''
-    Entrypoint to read a list of rootfiles, compute the BDT scores, and combine it all
-    in a single .npz file.
-    Uses multiprocessing to speed things up.
-    '''
-    print(f'Processing {len(rootfiles)} rootfiles to {outfile}')
-    tmpdir = strftime(f'TMP_%b%d_%H%M%S_{outfile}')
-    os.makedirs(tmpdir)
-    # Prepare input data
-    data = []
-    for rootfile in rootfiles:
-        data.append([ rootfile, model, osp.join(tmpdir, str(uuid.uuid4())+'.npz') ])
-    # Process data in multiprocessing pool
-    # Every thread will dump data into tmpdir/<unique id>.npz
-    pool = multiprocessing.Pool(n_threads)
-    pool.map(get_hist_worker, data)
-    pool.close()
-    pool.join()
-    # Combine the tmpdir/<unique id>.npz --> outfile and remove tmp files
-    combine_npzs(tmpdir, outfile)
-    if not keep_tmp_files:
-        print(f'Removing {tmpdir}')
-        shutil.rmtree(tmpdir)
+    np.savez(outfile, **get_hist(rootfile, model))
 
 
 def combine_ds(ds):
@@ -210,15 +187,51 @@ def optimal_count(counts, weights):
 
 
 # ________________________________________________________
+# For local multiprocessing running
+# Not recommended, way too slow
+
+def dump_score_npz_worker(input):
+    '''    
+    Like dump_score_npz but takes a single tuple as input.
+    To be used in dump_score_npzs_mp.
+    '''
+    dump_score_npz(*input)
+
+def dump_score_npzs_mp(model, rootfiles, outfile, n_threads=12, keep_tmp_files=False):
+    '''
+    Entrypoint to read a list of rootfiles, locally compute the BDT scores, and combine
+    it all in a single .npz file.
+    Uses multiprocessing to speed things up.
+    '''
+    print(f'Processing {len(rootfiles)} rootfiles to {outfile}')
+    tmpdir = strftime(f'TMP_%b%d_%H%M%S_{outfile}')
+    os.makedirs(tmpdir)
+    # Prepare input data
+    data = []
+    for rootfile in rootfiles:
+        data.append([ rootfile, model, osp.join(tmpdir, str(uuid.uuid4())+'.npz') ])
+    # Process data in multiprocessing pool
+    # Every thread will dump data into tmpdir/<unique id>.npz
+    pool = multiprocessing.Pool(n_threads)
+    pool.map(dump_score_npz_worker, data)
+    pool.close()
+    pool.join()
+    # Combine the tmpdir/<unique id>.npz --> outfile and remove tmp files
+    combine_npzs(tmpdir, outfile)
+    if not keep_tmp_files:
+        print(f'Removing {tmpdir}')
+        shutil.rmtree(tmpdir)
+
+# ________________________________________________________
 # Some tests
 
-def test_get_hist_worker():
+def test_dump_score_npz_worker():
     model = xgb.XGBClassifier()
     model.load_model('/Users/klijnsma/work/svj/bdt/svjbdt_Aug02.json')
     rootfile = 'TREEMAKER_genjetpt375_Jul21_mz250_mdark10_rinv0.337.root'
-    get_hist_worker((rootfile, model, 'out.npz'))
+    dump_score_npz_worker((rootfile, model, 'out.npz'))
 
-def test_get_hist_mp():
+def test_dump_score_npzs_mp():
     model = xgb.XGBClassifier()
     model.load_model('/Users/klijnsma/work/svj/bdt/svjbdt_Aug02.json')
     rootfiles = seutils.ls_wildcard(
@@ -226,8 +239,8 @@ def test_get_hist_mp():
         '/genjetpt375_mz250_mdark10_rinv0.3/*.root'
         )
     outfile = 'mz250_mdark10_rinv0p3.npz'
-    # get_hist_worker((rootfiles[1], model, 'out.npz'))
-    get_hist_mp(model, rootfiles, outfile)
+    # dump_score_npz_worker((rootfiles[1], model, 'out.npz'))
+    dump_score_npzs_mp(model, rootfiles, outfile)
 
 def test_optimal_count():
     counts = np.array([ 100, 200, 150 ])
