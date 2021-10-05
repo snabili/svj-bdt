@@ -146,27 +146,40 @@ def combine_ds_with_weights(ds, weights):
 
 def shrink_dict(d, n):
     """
-    Slices all values that are arrays in d up to :n
+    Slices all values that are arrays in d up to :n.
+    Integer counts are reduced by the fraction n/len(d)
     """
-    return { k : v[:n] if v.shape else v for k, v in d.items()}
+    len_d = len(d['score']) # Just pick an array key that is always there
+    frac = min(float(n/len_d), 1.)
+    return { k : v[:n] if v.shape else frac*v for k, v in d.items()}
 
 
 # Defauly mt binning
 MT_BINNING = [160.+8.*i for i in range(44)]
+# MT_BINNING = [8.*i for i in range(130)]
 
-def make_mt_histogram(name, mt, score=None, threshold=None, mt_binning=None):
+
+def make_mt_histogram(name, mt, score=None, threshold=None, mt_binning=None, normalization=None):
     """
     Dumps the mt array to a TH1F. If `score` and `threshold` are supplied, a
     cut score>threshold will be applied.
+
+    Normalization refers to the normalization *before* applying the threshold!
     """
     try_import_ROOT()
     import ROOT
     from array import array
-    if threshold is not None: mt = mt[score > threshold]
+    efficiency = 1.
+    if threshold is not None:
+        mt = mt[score > threshold]
+        efficiency = (score > threshold).sum() / score.shape[0]
+        # print(f'{name}: {efficiency=}')
     binning = array('f', MT_BINNING if mt_binning is None else mt_binning)
-    h = ROOT.TH1F(name, name, len(binning)-1, binning)
+    h = ROOT.TH1F(name.replace('.','p'), name, len(binning)-1, binning)
     ROOT.SetOwnership(h, False)
     [ h.Fill(x) for x in mt ]
+    if normalization is not None:
+        h.Scale(normalization*efficiency / h.Integral(0, h.GetNbinsX()+1))
     return h
 
 
