@@ -230,6 +230,8 @@ def make_histograms_Oct05(rootfile):
     finally:
         f.Close()
 
+# ________________________________________________________
+# BELOW THIS LINE IS OUTDATED
 
 # Some weights
 qcd_presel_eff = np.array([0.00544, 0.07959, 0.10906, 0.08919, 0.07280])
@@ -339,9 +341,6 @@ def get_combined_bkg():
     bkg = combine_ds_with_weights(bkg_ds, np.concatenate((qcd_presel_eff*qcd_crosssections, ttjets_presel_eff*ttjets_crosssections)))
     return bkg
 
-
-# ________________________________________________________
-# BELOW THIS LINE IS OUTDATED
 
 @cli.command()
 @click.option('-o', '--rootfile', default='test.root')
